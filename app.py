@@ -3,7 +3,9 @@ from data import articles
 from flask_mysqldb import MySQL
 from wtforms import Form, StringField, TextAreaField, PasswordField, validators
 from passlib.hash import sha256_crypt
+from functools import wraps
 
+# Initializing flask
 app = Flask(__name__)
 
 # Config MySQL
@@ -13,28 +15,37 @@ app.config['MYSQL_PASSWORD'] = '123456'
 app.config['MYSQL_DB'] = 'myflaskapp'
 app.config['MYSQL_CURSORCLASS'] = 'DictCursor'
 
+
+# To setup the table correctly, use this:
+# CREATE TABLE users(id INT(11) AUTO_INCREMENT PRIMARY KEY, name VARCHAR(100), email VARCHAR(100), username VARCHAR(30), password VARCHAR(100), register_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
+
 # init MYSQL
 mysql = MySQL(app)
 
 
 Articles = articles()
 
+# Home page
 @app.route('/')
 def index():
     return render_template('home.html')
 
+# About page
 @app.route('/about')
 def about():
     return render_template('about.html')
 
+# Articles page
 @app.route('/articles')
 def articles():
     return render_template('articles.html', articles = Articles)
 
+# Single article page
 @app.route('/article/<string:id>')
 def article(id):
     return render_template('article.html', id = id)
 
+# Register form class for using WTForms
 class RegisterForm(Form):
     # Creating a form class for WTForms
     name = StringField('Name', [validators.Length(min=1, max=50)])
@@ -46,6 +57,7 @@ class RegisterForm(Form):
     ])
     confirm = PasswordField('Confirm Password')
 
+# User Register
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     form = RegisterForm(request.form)
@@ -73,6 +85,74 @@ def register():
         return redirect(url_for('index'))
 
     return render_template('register.html', form=form)
+
+# User Login
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        # Get Form Fields
+        username = request.form['username']
+        password_candidate = request.form['password']
+
+        # Create Cursor
+        cur = mysql.connection.cursor()
+
+        # Get user by username
+        result = cur.execute("SELECT * FROM users WHERE username = %s", [username])
+
+        if result > 0:
+            # Get stored hash
+            data = cur.fetchone()
+            password = data['password']
+
+            # Compare passowors
+            if sha256_crypt.verify(password_candidate, password):
+                # Passed 
+                session['logged_in'] = True
+                session['username'] = username
+
+                flash('You are now logged in', 'success')
+                return redirect('dashboard')
+
+            else:
+                error = 'Invalid Login'
+                return render_template('login.html', error=error)
+            
+            # Close Connection
+            cur.close()
+
+        else:
+            error = 'Username Not Found'
+            return render_template('login.html', error=error)
+
+    return render_template('login.html')
+
+# Check if user are logged in
+# I dont quite understand this, so !TODO learn about *args and **kwargs
+def is_logged_in(f):
+    @wraps(f)
+    def wrap(*args, **kwargs):
+        if 'logged_in' in session:
+            return f(*args, **kwargs)
+        else:
+            flash('Unauthorized, please login', 'danger')
+            return redirect(url_for('login'))
+
+    return wrap
+
+# Logout
+@app.route('/logout')
+def logout():
+    session.clear()
+    flash('You are now logged out', 'success')
+    return redirect(url_for('login'))
+
+
+# Dashboard page for logged users
+@app.route('/dashboard')
+@is_logged_in
+def dashboard():
+    return render_template('dashboard.html')
 
 if __name__ == '__main__':
     app.secret_key = 'notvery12secret'
