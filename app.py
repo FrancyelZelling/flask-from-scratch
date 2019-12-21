@@ -1,5 +1,5 @@
 from flask import Flask, render_template, flash, redirect, url_for, session, logging, request
-from data import articles
+# from data import articles
 from flask_mysqldb import MySQL
 from wtforms import Form, StringField, TextAreaField, PasswordField, validators
 from passlib.hash import sha256_crypt
@@ -17,13 +17,17 @@ app.config['MYSQL_CURSORCLASS'] = 'DictCursor'
 
 
 # To setup the table correctly, use this:
+
 # CREATE TABLE users(id INT(11) AUTO_INCREMENT PRIMARY KEY, name VARCHAR(100), email VARCHAR(100), username VARCHAR(30), password VARCHAR(100), register_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
+
+#CREATE TABLE articles( id INT(11) AUTO_INCREMENT PRIMARY KEY, title VARCHAR(255), author VARCHAR(100), body TEXT, create_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
+
 
 # init MYSQL
 mysql = MySQL(app)
 
 
-Articles = articles()
+# Articles = articles()
 
 # Home page
 @app.route('/')
@@ -38,12 +42,35 @@ def about():
 # Articles page
 @app.route('/articles')
 def articles():
-    return render_template('articles.html', articles = Articles)
+    # Create cursor
+    cur = mysql.connection.cursor()
+
+    # Get articles
+    result = cur.execute("SELECT * FROM articles")
+
+    articles = cur.fetchall()
+
+    if result > 0:
+        return render_template('articles.html', articles=articles)
+    
+    else:
+        msg = 'No articles found'
+        return render_template('articles.html', msg=msg)
+
+    # Close Connection
 
 # Single article page
 @app.route('/article/<string:id>')
 def article(id):
-    return render_template('article.html', id = id)
+    # Create cursor
+    cur = mysql.connection.cursor()
+
+    # Get article
+    result = cur.execute("SELECT * FROM articles WHERE id = %s", [id])
+
+    article = cur.fetchone()
+
+    return render_template('article.html', article=article)
 
 # Register form class for using WTForms
 class RegisterForm(Form):
@@ -142,6 +169,7 @@ def is_logged_in(f):
 
 # Logout
 @app.route('/logout')
+@is_logged_in
 def logout():
     session.clear()
     flash('You are now logged out', 'success')
@@ -152,7 +180,59 @@ def logout():
 @app.route('/dashboard')
 @is_logged_in
 def dashboard():
-    return render_template('dashboard.html')
+    # Fetch All Articles from DB to display on dashboard page
+    # Create cursor
+    cur = mysql.connection.cursor()
+
+    # Get articles
+    result = cur.execute("SELECT * FROM articles")
+
+    articles = cur.fetchall()
+
+    if result > 0:
+        return render_template('dashboard.html', articles=articles)
+    
+    else:
+        msg = 'No articles found'
+        return render_template('dashboard.html', msg=msg)
+
+    # Close Connection
+    cur.close()
+
+# Article form class for using WTForms
+class ArticleForm(Form):
+    # Creating a form class for WTForms
+    title = StringField('Title', [validators.Length(min=3, max=200)])
+    body = TextAreaField('Body', [validators.Length(min=20)])
+
+
+# Add Article
+@app.route('/add_article', methods=['GET', 'POST'])
+@is_logged_in
+def add_article():
+    form = ArticleForm(request.form)
+    if request.method == 'POST' and form.validate():
+        title = form.title.data
+        body = form.body.data
+        
+        # Create Cursor
+        cur = mysql.connection.cursor()
+        
+        # Execute Cursor
+        cur.execute("INSERT INTO articles(title, body, author) VALUES(%s, %s, %s)",(title, body, session['username']))
+        
+        # Commit to DB
+        mysql.connection.commit()
+        
+        # Close connection
+        cur.close()
+        
+        flash('Article Created', 'success')
+
+        return redirect(url_for('dashboard'))
+
+    return render_template('add_article.html', form=form)
+
 
 if __name__ == '__main__':
     app.secret_key = 'notvery12secret'
